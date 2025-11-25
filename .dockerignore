@@ -1,0 +1,6 @@
+.idea
+.dockerignore
+.gitignore
+.env
+venv
+test

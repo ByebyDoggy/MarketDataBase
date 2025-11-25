@@ -1,0 +1,8 @@
+fastapi~=0.121.0
+coingecko-sdk
+uvicorn~=0.38.0
+pydantic~=2.12.3
+apscheduler~=3.11.1
+python-coinmarketcap
+arkm-client
+pydantic_settings

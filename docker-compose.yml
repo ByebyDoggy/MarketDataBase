@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: market-data-collector
+    ports:
+      - "8000:8000"
+    # 添加环境变量设置
+    environment:
+      - ENV=production
+      - DEBUG=false
+      - DOCKER_ENV=true
+    # 允许从宿主机.env文件加载环境变量
+    env_file:
+      - .env
+    restart: unless-stopped
