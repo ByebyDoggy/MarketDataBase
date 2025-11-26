@@ -1,4 +1,6 @@
 # scheduler.py
+import asyncio
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from app.data_processor import DataProcessor
@@ -23,6 +25,7 @@ class DataScheduler:
             logger.info(f"Updated top exchanges infos for {len(coin_ids)} coins")
             await self.processor.update_markets_data()
             logger.info(f"Updated markets data for {len(coin_ids)} coins")
+            asyncio.create_task(self.update_exchange_tokens_holders())
             self.is_initialized = True
             logger.info(f"Data initialization completed for {len(coin_ids)} coins")
         except Exception as e:
@@ -57,7 +60,7 @@ class DataScheduler:
         self.scheduler.add_job(
             self.update_exchange_tokens_holders,
             trigger=IntervalTrigger(hours=24),
-            id='update_exchange_tokens_holders'
+            id='update_exchange_tokens_holders',
         )
 
         self.scheduler.start()
@@ -88,6 +91,8 @@ class DataScheduler:
                 perps = coin_info.exchange_contracts
                 if spots or perps:
                     await self.processor.fetch_token_top_holders(coin_id,use_sync=True)
+                    await asyncio.sleep(0.5)
             logger.info("Exchange tokens holders updated successfully")
         except Exception as e:
             logger.error(f"Error updating Binance tokens holders: {e}")
+

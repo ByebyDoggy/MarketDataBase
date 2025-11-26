@@ -6,3 +6,6 @@ apscheduler~=3.11.1
 python-coinmarketcap
 arkm-client
 pydantic_settings
+sqlalchemy
+strawberry-graphql[fastapi]
+sqlmodel

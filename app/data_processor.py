@@ -10,7 +10,6 @@ import logging
 from app.const import TOP_SWAP_EXCHANGES, TOP_SPOT_EXCHANGES, ORIGIN_TOKEN_WRAPPED_TOKEN_MAP
 from app.config import settings
 from coinmarketcapapi import CoinMarketCapAPI
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -259,15 +258,20 @@ class DataProcessor:
     async def fetch_token_top_holders(self, token_id: str, use_sync: bool = False):
         """获取代币顶部持有者"""
         path = f"/token/holders/{token_id}?groupByEntity=true"
-        if use_sync:
-            response = self.arkm_sync_client.get(path=path)
-        else:
-            response = await self.arkm_async_client.get(path=path)
+        try:
+            if use_sync:
+                response = self.arkm_sync_client.get(path=path)
+            else:
+                response = await self.arkm_async_client.get(path=path)
+        except Exception:
+            return []
         try:
             if response:
                 json_response = response
                 addressTopHolders = json_response.get('addressTopHolders', [])
                 for chain, holders in addressTopHolders.items():
+                    if not holders:
+                        continue
                     for holder in holders:
                         address_info = holder.get('address', {})
                         if address_info:
@@ -311,3 +315,12 @@ class DataProcessor:
         for coin_id, coin_info in self.coin_data.items():
             self._update_search_index(coin_id, coin_info.symbol, coin_info.name)
         logger.info(f"Built search index with {len(self.search_index)} entries")
+
+    def get_coins_by_exchange(self, exchange_id: str) -> List[CoinInfo]:
+        """根据交易所ID获取币种信息"""
+        result = []
+        for coin_id, coin_info in self.coin_data.items():
+            exchange_names = {spot.exchange_name for spot in coin_info.exchange_spots} | {contract.exchange_name for contract in coin_info.exchange_contracts}
+            if exchange_id in exchange_names:
+                result.append(coin_info)
+        return result

@@ -1,42 +1,88 @@
-# main.py
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-
-from app.data_processor import DataProcessor
-from app.models import CoinInfo, SearchRequest
+from sqlalchemy.orm import Session
+from app.database.processor import DataProcessor
+from app.database.models import Coin
+from app.database.manager import DatabaseManager
+from app.config import settings
 import logging
 import uvicorn
-from typing import List
-from app.config import settings
-from app.scheduler import DataScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+from app.database.query import CoinRepository
+from app.sevice import CoinService
+# 添加GraphQL相关导入
+import strawberry
+from strawberry.fastapi import GraphQLRouter
+from app.graphql import Query as GraphQLQuery
 
-# 初始化数据调度器
-data_scheduler: DataScheduler = DataScheduler()
+# 初始化组件
+db_manager = DatabaseManager()
+app_service: CoinService = None
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def get_db_session():
+    """依赖注入：获取数据库会话"""
+    db = db_manager.get_session()
+    try:
+        yield db
+    finally:
+        db_manager.close_session(db)
+
+def get_coin_service(db: Session = Depends(get_db_session)):
+    """依赖注入：获取币种服务"""
+    repository = CoinRepository(db)
+    processor = DataProcessor(db)
+    return CoinService(repository, processor)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global data_scheduler
-    await data_scheduler.initialize_data(force_refresh=settings.FORCE_REFRESH_DATA)
-    processor:DataProcessor = data_scheduler.processor
-    await processor.fetch_token_top_holders(token_id='swell-network',use_sync=True)
-    data_scheduler.start_scheduler()
+    global app_service
+
+    # 初始化数据库
+    db_manager.init_db()
+
+    # 获取数据库会话和服务
+    db = db_manager.get_session()
+    repository = CoinRepository(db)
+    processor = DataProcessor(db)
+    app_service = CoinService(repository, processor)
+
+    # 初始化数据
+    force_refresh = settings.FORCE_REFRESH_DATA
+    if force_refresh:
+        await app_service.refresh_data()
+    db_manager.close_session(db)
+
+    # schedule 定时任务
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(app_service.processor.initialize_coins_data, IntervalTrigger(minutes=settings.COIN_LIST_REFRESH_INTERVAL_MINUTES))
+    scheduler.add_job(app_service.processor.update_exchange_data, IntervalTrigger(minutes=settings.EXCHANGE_DATA_REFRESH_INTERVAL_MINUTES))
+    scheduler.add_job(app_service.processor.update_market_data, IntervalTrigger(minutes=settings.MARKET_DATA_REFRESH_INTERVAL_MINUTES))
+    scheduler.add_job(app_service.processor.update_top_project_token_holders, IntervalTrigger(minutes=settings.TOKEN_HOLDERS_REFRESH_INTERVAL_MINUTES))
+    scheduler.start()
+
     logger.info("Application started")
     yield
-    data_scheduler.stop_scheduler()
     logger.info("Application stopped")
 
+# 创建GraphQL schema
+schema = strawberry.Schema(query=GraphQLQuery)
 
 app = FastAPI(
     title="Coingecko Data API",
     description="基于Coingecko SDK的加密货币数据服务",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
+
+# 添加GraphQL路由
+graphql_app = GraphQLRouter(schema)
+app.include_router(graphql_app, prefix="/graphql")
 
 # CORS中间件
 app.add_middleware(
@@ -47,155 +93,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ... existing code ...
 
+# 删除原有的HTTP查询端点，只保留根路径和健康检查端点
 @app.get("/")
 async def root():
     return {
         "message": "Coingecko Data API",
         "status": "running",
-        "initialized": data_scheduler.is_initialized if data_scheduler else False
+        "version": "2.0.0",
+        "graphql_endpoint": "/graphql"
     }
-
-@app.get("/coin/by_contract/{contract_address}")
-async def get_coin_by_contract(contract_address: str) -> List[CoinInfo]:
-    """
-    根据链上合约地址获取币种信息
-    支持多个链（返回所有匹配）
-    """
-    global data_scheduler
-    if not data_scheduler or not data_scheduler.is_initialized:
-        raise HTTPException(status_code=503, detail="Service initializing")
-
-    normalized_addr = contract_address.lower()
-    matches = []
-
-    for coin in data_scheduler.processor.coin_data.values():
-        for info in coin.on_chain_info:
-            if info.contract_address.lower() == normalized_addr:
-                matches.append(coin)
-                break
-
-    if not matches:
-        raise HTTPException(status_code=404, detail="No coin found for this contract address")
-
-    return matches
-
-@app.get("/coin/{coin_id}")
-async def get_coin_by_id(coin_id: str) -> CoinInfo:
-    """根据coin_id获取币种信息"""
-    global data_scheduler
-    if not data_scheduler or not data_scheduler.is_initialized:
-        raise HTTPException(status_code=503, detail="Service initializing")
-
-    coin_info = data_scheduler.processor.get_coin_by_id(coin_id)
-    if not coin_info:
-        raise HTTPException(status_code=404, detail="Coin not found")
-
-    return coin_info
-
-
-@app.post("/search")
-async def search_coin(request: SearchRequest) -> list[CoinInfo]:
-    """搜索币种信息"""
-    global data_scheduler
-    if not data_scheduler or not data_scheduler.is_initialized:
-        raise HTTPException(status_code=503, detail="Service initializing")
-
-    if not request.search_term.strip():
-        raise HTTPException(status_code=400, detail="Search term cannot be empty")
-
-    results = data_scheduler.processor.search_coins(request.search_term)
-    return results
-
-
-@app.get("/search")
-async def search_coin_get(search_term: str = Query(..., description="搜索词")) -> list[CoinInfo]:
-    """搜索币种信息 (GET版本)"""
-    global data_scheduler
-    if not data_scheduler or not data_scheduler.is_initialized:
-        raise HTTPException(status_code=503, detail="Service initializing")
-
-    if not search_term.strip():
-        raise HTTPException(status_code=400, detail="Search term cannot be empty")
-
-    results = data_scheduler.processor.search_coins(search_term)
-    return results
-
-
-@app.get("/coins")
-async def get_all_coins(limit: int = Query(100, ge=1, le=1000)) -> list[CoinInfo]:
-    """获取所有币种信息（分页）"""
-    global data_scheduler
-    if not data_scheduler or not data_scheduler.is_initialized:
-        raise HTTPException(status_code=503, detail="Service initializing")
-
-    coin_ids = data_scheduler.processor.get_all_coin_ids()[:limit]
-    coins = []
-    for coin_id in coin_ids:
-        coin_info = data_scheduler.processor.get_coin_by_id(coin_id)
-        if coin_info:
-            coins.append(coin_info)
-
-    return coins
-
-# 新增：根据holder address查询持有代币信息的端点
-@app.get("/holder/{holder_address}/tokens")
-async def get_tokens_by_holder(holder_address: str) -> list[CoinInfo]:
-    """
-    根据holder address查询持有的代币信息
-    """
-    global data_scheduler
-    if not data_scheduler or not data_scheduler.is_initialized:
-        raise HTTPException(status_code=503, detail="Service initializing")
-
-    # 验证holder_address格式（简单验证）
-    if not holder_address or len(holder_address) < 10:
-        raise HTTPException(status_code=400, detail="Invalid holder address")
-
-    # 调用processor中的方法获取holder持有的代币信息
-    # 注意：这里假设data_scheduler.processor有get_tokens_by_holder方法
-    try:
-        tokens = data_scheduler.processor.get_coins_by_holder(holder_address)
-        if not tokens:
-            raise HTTPException(status_code=404, detail="No tokens found for this holder")
-        return tokens
-    except AttributeError:
-        raise HTTPException(status_code=501, detail="This feature is not implemented yet")
-    except Exception as e:
-        logger.error(f"Error fetching tokens for holder {holder_address}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
 
 @app.get("/health")
-async def health_check():
+async def health_check(service: CoinService = Depends(get_coin_service)):
     """健康检查"""
-    global data_scheduler
-    status = "healthy" if data_scheduler and data_scheduler.is_initialized else "initializing"
-    coin_count = len(data_scheduler.processor.coin_data) if data_scheduler else 0
-
+    db = next(get_db_session())
+    coin_count = db.query(Coin).count()
     return {
-        "status": status,
-        "initialized": data_scheduler.is_initialized if data_scheduler else False,
-        "coin_count": coin_count,
-        "search_index_size": len(data_scheduler.processor.search_index) if data_scheduler else 0
+        "status": "healthy",
+        "coin_count": coin_count
     }
 
-# 添加一个新的端点用于手动触发数据保存
-@app.post("/admin/save-data")
-async def save_data():
-    """手动保存数据到数据库"""
-    global data_scheduler
-    if not data_scheduler or not data_scheduler.is_initialized:
-        raise HTTPException(status_code=503, detail="Service initializing")
-
-    try:
-        data_scheduler.processor.save_to_db()
-        return {"message": "Data saved successfully"}
-    except Exception as e:
-        logger.error(f"Error saving data: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save data")
-
-
+# 删除其他HTTP端点，使用GraphQL替代
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host=settings.API_HOST, port=settings.API_PORT, reload=settings.API_RELOAD)

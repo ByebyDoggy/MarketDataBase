@@ -3,7 +3,7 @@ version: '3.8'
 services:
   app:
     build: .
-    container_name: market-data-collector
+    container_name: market-database
     ports:
       - "8000:8000"
     # 添加环境变量设置
@@ -12,6 +12,8 @@ services:
       - DEBUG=false
       - DOCKER_ENV=true
     # 允许从宿主机.env文件加载环境变量
+    volumes:
+      - ./market_data.db:/market-database/market_data.db
     env_file:
       - .env
     restart: unless-stopped

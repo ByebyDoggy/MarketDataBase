@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 LABEL authors="byebyedoggy"
 
-WORKDIR /market-data-collector
+WORKDIR /market-database
 
 COPY requirements.txt .
 

@@ -2,34 +2,34 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 
-
 class Settings(BaseSettings):
     # API配置
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-    API_RELOAD: bool = False
+    API_RELOAD: bool = True
 
-    # Coingecko API配置
-    CG_API_KEY: Optional[str] = None
-    CMC_API_KEY: Optional[str] = None
-    # Cookie相关配置
-    COOKIE: Optional[str] = None
+    # 数据库配置
+    DB_PATH: str = "market_data.db"
 
-    # 调度器配置
-    SCHEDULER_INTERVAL: int = 300  # 5分钟更新一次
+    # API密钥
+    CG_API_KEY: str = os.getenv("CG_API_KEY", "")
+    CMC_API_KEY: str = os.getenv("CMC_API_KEY", "")
+    COOKIE: str = os.getenv("COOKIE", "")
 
-    # 日志配置
-    LOG_LEVEL: str = "INFO"
+    # 调试模式
+    DEBUG: bool = False
 
-    # 启动项
-    FORCE_REFRESH_DATA: bool = True
+    # 数据刷新配置
+    FORCE_REFRESH_DATA: bool = False
+
+    # 定时任务配置
+    COIN_LIST_REFRESH_INTERVAL_MINUTES: int = 1440
+    EXCHANGE_DATA_REFRESH_INTERVAL_MINUTES: int = 120
+    TOKEN_HOLDERS_REFRESH_INTERVAL_MINUTES: int = 1440
+    MARKET_DATA_REFRESH_INTERVAL_MINUTES: int = 120
 
     class Config:
-        # 检查是否在Docker环境中运行
-        if not os.getenv("DOCKER_ENV"):
-            env_file = ".env"
-        env_file_encoding = "utf-8"
-
+        env_file = ".env"
 
 # 创建全局配置实例
 settings = Settings()
