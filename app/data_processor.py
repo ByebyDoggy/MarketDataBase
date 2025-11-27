@@ -120,25 +120,6 @@ class DataProcessor:
             logger.error(f"Error initializing data: {e}")
 
     async def update_markets_data(self):
-        # 获取市场数据（包含供应量信息）
-        # page = 1
-        # while page < 20:
-        #     markets_data = await self.cg.coins.markets.get(vs_currency="usd", page=page)
-        #     for market in markets_data:
-        #         coin_id = market.id
-        #         symbol = market.symbol.upper()
-        #         name = market.name
-        #         # 初始化币种信息
-        #         if coin_id in self.coin_data:
-        #             self.coin_data[coin_id].supply_info = SupplyInfo(
-        #                 total_supply=market.total_supply,
-        #                 circulating_supply=market.max_supply,
-        #                 market_cap=market.market_cap
-        #             )
-        #             # 更新搜索索引
-        #             self._update_search_index(coin_id, symbol, name)
-        #         page += 1
-        #         await asyncio.sleep(1)
         response = self.cmc.cryptocurrency_listings_latest(limit=2000)
         datas = response.data
         for data in datas:

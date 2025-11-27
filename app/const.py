@@ -13,6 +13,7 @@ WRAPPED_TOKEN_ORIGIN_TOKEN_ID_MAP: dict[str, str] = {
     'staked-ether': 'ethereum',
     'mantle-staked-ether': 'ethereum',
     'mantle-restaked-eth': 'ethereum',
+
 }
 
 ORIGIN_TOKEN_WRAPPED_TOKEN_MAP: dict[str, list[str]] = {

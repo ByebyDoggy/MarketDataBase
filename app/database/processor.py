@@ -3,7 +3,7 @@ from app.database.models import Coin, SupplyInfo, OnChainInfo, ExchangeSpot, Exc
 from app.crawlers.coingecko import CoingeckoCrawler
 from app.crawlers.coinmarketcap import CoinMarketCapCrawler
 from app.crawlers.arkm import ArkmCrawler
-from app.const import TOP_SPOT_EXCHANGES, TOP_SWAP_EXCHANGES, UPDATE_HOLDERS_EXCHANGES
+from app.const import TOP_SPOT_EXCHANGES, TOP_SWAP_EXCHANGES, UPDATE_HOLDERS_EXCHANGES, ORIGIN_TOKEN_WRAPPED_TOKEN_MAP
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,14 +52,13 @@ class DataProcessor:
             coin_id = item.get('slug')
             cmc_symbol = item.get('symbol')
             cmc_name = item.get('name')
-
             # 查找匹配的币种
             coin = self.db.query(Coin).filter(
                 Coin.symbol == cmc_symbol.upper(),
                 Coin.name == cmc_name
             ).first()
-
             if coin:
+                print(f"Found coin: {coin.id} - {coin.symbol} - {coin.name}")
                 # 更新供应信息
                 supply_info = self.db.query(SupplyInfo).filter(
                     SupplyInfo.coin_id == coin.id
@@ -74,6 +73,25 @@ class DataProcessor:
                 supply_info.market_cap = item.get('quote', {}).get('USD', {}).get('market_cap')
                 supply_info.cached_price = item.get('quote', {}).get('USD', {}).get('price')
 
+                # 处理包装代币供应信息
+                if coin_id in ORIGIN_TOKEN_WRAPPED_TOKEN_MAP:
+                    for wrapped_token_id in ORIGIN_TOKEN_WRAPPED_TOKEN_MAP[coin_id]:
+                        wrapped_coin = self.db.query(Coin).filter(Coin.id == wrapped_token_id).first()
+                        if wrapped_coin:
+                            # 为包装代币单独创建 SupplyInfo 或复用已有 SupplyInfo 并复制数据
+                            wrapped_supply_info = self.db.query(SupplyInfo).filter(
+                                SupplyInfo.coin_id == wrapped_coin.id
+                            ).first()
+
+                            if not wrapped_supply_info:
+                                wrapped_supply_info = SupplyInfo(coin_id=wrapped_coin.id)
+                                self.db.add(wrapped_supply_info)
+
+                            # 将原始代币的数据拷贝到包装代币
+                            wrapped_supply_info.total_supply = supply_info.total_supply
+                            wrapped_supply_info.circulating_supply = supply_info.circulating_supply
+                            wrapped_supply_info.market_cap = supply_info.market_cap
+                            wrapped_supply_info.cached_price = supply_info.cached_price
         self.db.commit()
         logger.info("Market data updated")
 
@@ -168,6 +186,11 @@ class DataProcessor:
                 continue
 
         logger.info(f"Updated token holders for {len(coin_ids)} top project tokens")
+
+    async def update_most_popular_wrapped_token_holders(self):
+        """更新热门包装代币持有者"""
+        pass
+
 
     async def fetch_token_holders(self, token_id: str, use_sync: bool = False):
         """获取代币持有者数据"""
