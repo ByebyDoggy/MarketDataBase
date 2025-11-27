@@ -1,6 +1,10 @@
 import strawberry
 from typing import Optional, List
+import datetime
 
+# ---------------------------
+# SupplyInfo
+# ---------------------------
 @strawberry.type
 class SupplyInfoGraphQL:
     id: int
@@ -9,41 +13,80 @@ class SupplyInfoGraphQL:
     circulating_supply: Optional[float]
     cached_price: Optional[float]
     market_cap: Optional[float]
-    updated_at: str
+    updated_at: datetime.datetime
 
+# ---------------------------
+# OnChainInfo
+# ---------------------------
 @strawberry.type
 class OnChainInfoGraphQL:
     id: int
     coin_id: str
     chain_name: str
     contract_address: str
-    updated_at: str
+    updated_at: datetime.datetime
 
+# ---------------------------
+# ExchangeSpot
+# ---------------------------
 @strawberry.type
 class ExchangeSpotGraphQL:
     id: int
     coin_id: str
     exchange_name: str
     spot_name: str
-    updated_at: str
+    updated_at: datetime.datetime
+    # 关联数据
+    coin: Optional['CoinGraphQL'] = None
 
+# ---------------------------
+# ExchangeContract
+# ---------------------------
 @strawberry.type
 class ExchangeContractGraphQL:
     id: int
     coin_id: str
     exchange_name: str
     contract_name: str
-    updated_at: str
+    updated_at: datetime.datetime
+    # 关联数据
+    coin: Optional['CoinGraphQL'] = None
 
+# ---------------------------
+# Label
+# ---------------------------
+@strawberry.type
+class LabelGraphQL:
+    id: int
+    name: str
+    chain_type: Optional[str]
+
+# ---------------------------
+# ARKMEntity
+# ---------------------------
+@strawberry.type
+class ARKMEntityGraphQL:
+    id: int
+    name: str
+    type: Optional[str]
+
+# ---------------------------
+# Holder
+# ---------------------------
 @strawberry.type
 class HolderGraphQL:
     id: int
     address: str
-    label_name: Optional[str]
-    label_address: Optional[str]
     chain_type: Optional[str]
-    updated_at: str
+    updated_at: datetime.datetime
 
+    # 关联数据
+    entity: Optional[ARKMEntityGraphQL] = None
+    label: Optional[LabelGraphQL] = None
+
+# ---------------------------
+# CoinHolding
+# ---------------------------
 @strawberry.type
 class CoinHoldingGraphQL:
     id: int
@@ -51,34 +94,25 @@ class CoinHoldingGraphQL:
     holder_id: int
     balance: Optional[float]
     usd_value: Optional[float]
-    updated_at: str
-    holder: Optional[HolderGraphQL]
+    updated_at: datetime.datetime
 
+    # 关联数据
+    holder: Optional[HolderGraphQL] = None
+
+# ---------------------------
+# Coin
+# ---------------------------
 @strawberry.type
-class CoinInfoGraphQL:
+class CoinGraphQL:
     id: str
     symbol: str
     name: str
-    current_price: Optional[float]
-    market_cap: Optional[float]
-    market_cap_rank: Optional[int]
-    total_volume: Optional[float]
-    high_24h: Optional[float]
-    low_24h: Optional[float]
-    price_change_24h: Optional[float]
-    price_change_percentage_24h: Optional[float]
-    market_cap_change_24h: Optional[float]
-    market_cap_change_percentage_24h: Optional[float]
-    circulating_supply: Optional[float]
-    total_supply: Optional[float]
-    max_supply: Optional[float]
-    ath: Optional[float]
-    ath_change_percentage: Optional[float]
-    ath_date: Optional[str]
-    atl: Optional[float]
-    atl_change_percentage: Optional[float]
-    atl_date: Optional[str]
-    last_updated: Optional[str]
+    current_price: Optional[float] = None
+    market_cap: Optional[float] = None
+    circulating_supply: Optional[float] = None
+    total_supply: Optional[float] = None
+    created_at: datetime.datetime = datetime.datetime.now()
+    updated_at: datetime.datetime = datetime.datetime.now()
 
     # 关联数据
     supply_info: Optional[SupplyInfoGraphQL] = None

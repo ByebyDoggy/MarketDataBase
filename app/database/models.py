@@ -112,48 +112,102 @@ class ExchangeContract(SQLModel, table=True):
     coin: Coin = Relationship(back_populates="exchange_contracts")
 
 
-# ---------------------------
-# 持有者表
-# ---------------------------
+# =========================================================
+# Holder（持有者地址）
+# =========================================================
 class Holder(SQLModel, table=True):
     __tablename__ = "holders"
     __table_args__ = (
-        Index("idx_holder_label_chain", "label_name", "chain_type"),
+        UniqueConstraint("address"),
+        Index("idx_holder_entity", "entity_id"),
+        Index("idx_holder_label", "label_id"),
+        Index("idx_holder_chain", "chain_type"),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    # address 优化（默认 TEXT → varchar(64）更适合链上地址，性能更好）
+    # 链上地址（优化成 varchar(64））
     address: str = Field(
-        sa_column=Column(String(64), unique=True, index=True, nullable=False)
+        sa_column=Column(String(64), unique=True, nullable=False, index=True)
     )
 
-    label_name: Optional[str] = Field(default=None, index=True)
-    label_address: Optional[str] = None
-    chain_type: Optional[str] = Field(default=None)
+    chain_type: Optional[str] = Field(default=None, index=True)
+
+    # 多对一 — Holder → ARKMEntity
+    entity_id: Optional[int] = Field(default=None, foreign_key="arkm_entities.id")
+    entity: Optional['ARKMEntity'] = Relationship(back_populates="holders")
+
+    # 多对一 — Holder → Label
+    label_id: Optional[int] = Field(default=None, foreign_key="labels.id")
+    label: Optional['Label'] = Relationship(back_populates="holders")
+
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
 
+    # 多对多：Holder 拥有哪些币
     coin_holdings: List["CoinHolding"] = Relationship(back_populates="holder")
 
 
 # ---------------------------
 # 多对多：币种持有表
 # ---------------------------
+# =========================================================
+# CoinHolding（保持原结构）
+# =========================================================
 class CoinHolding(SQLModel, table=True):
     __tablename__ = "coin_holdings"
     __table_args__ = (
-        UniqueConstraint("coin_id", "holder_id"),  # 一个人对一个币只有一条记录
-        Index("idx_coin_holding", "coin_id", "holder_id"),  # 查询超级快
+        UniqueConstraint("coin_id", "holder_id"),
+        Index("idx_coin_holding", "coin_id", "holder_id"),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     coin_id: str = Field(foreign_key="coins.id", nullable=False)
     holder_id: int = Field(foreign_key="holders.id", nullable=False)
+
     balance: Optional[float] = None
     usd_value: Optional[float] = None
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
 
-    coin: Coin = Relationship(back_populates="holdings")
-    holder: Holder = Relationship(back_populates="coin_holdings")
+    coin: "Coin" = Relationship(back_populates="holdings")
+    holder: 'Holder' = Relationship(back_populates="coin_holdings")
+
+
+# =========================================================
+# ARKMEntity（实体信息）
+# =========================================================
+class ARKMEntity(SQLModel, table=True):
+    __tablename__ = "arkm_entities"
+    __table_args__ = (
+        Index("idx_entity_name", "name"),
+        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    name: str = Field(nullable=False, index=True)
+    type: Optional[str] = None
+
+    # 反向：一个 Entity 可以绑定多个 Holder
+    holders: List["Holder"] = Relationship(back_populates="entity")
+
+
+# =========================================================
+# Label（标签信息）
+# =========================================================
+class Label(SQLModel, table=True):
+    __tablename__ = "labels"
+    __table_args__ = (
+        Index("idx_label_name", "name"),
+        Index("idx_label_chain", "chain_type"),
+        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    name: str = Field(nullable=False)
+    chain_type: Optional[str] = None
+
+    # 一个 label 可被多个 holder 使用
+    holders: List["Holder"] = Relationship(back_populates="label")

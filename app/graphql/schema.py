@@ -5,11 +5,12 @@ from app.database.query import CoinRepository
 from app.database.processor import DataProcessor
 from app.sevice import CoinService
 from app.graphql.models import (
-    CoinInfoGraphQL, SupplyInfoGraphQL, OnChainInfoGraphQL,
-    ExchangeSpotGraphQL, ExchangeContractGraphQL, CoinHoldingGraphQL, HolderGraphQL
+    CoinGraphQL, SupplyInfoGraphQL, OnChainInfoGraphQL,
+    ExchangeSpotGraphQL, ExchangeContractGraphQL, CoinHoldingGraphQL, HolderGraphQL, ARKMEntityGraphQL, LabelGraphQL
 )
 
 db_manager = DatabaseManager()
+
 
 # 创建GraphQL模型的辅助函数
 def convert_coin_to_graphql(coin_db):
@@ -22,24 +23,10 @@ def convert_coin_to_graphql(coin_db):
         # 这些字段应该来自SupplyInfo或其他相关表
         "current_price": None,
         "market_cap": None,
-        "market_cap_rank": None,
-        "total_volume": None,
-        "high_24h": None,
-        "low_24h": None,
-        "price_change_24h": None,
-        "price_change_percentage_24h": None,
-        "market_cap_change_24h": None,
-        "market_cap_change_percentage_24h": None,
         "circulating_supply": None,
         "total_supply": None,
-        "max_supply": None,
-        "ath": None,
-        "ath_change_percentage": None,
-        "ath_date": None,
-        "atl": None,
-        "atl_change_percentage": None,
-        "atl_date": None,
-        "last_updated": coin_db.updated_at.isoformat() if coin_db.updated_at else None,
+        "created_at": coin_db.created_at.isoformat() if coin_db.created_at else None,
+        "updated_at": coin_db.updated_at.isoformat() if coin_db.updated_at else None,
     }
 
     # 添加关联数据
@@ -103,12 +90,23 @@ def convert_coin_to_graphql(coin_db):
             holder_graphql = None
             if holding.holder:
                 holder = holding.holder
+                holder_entity_graphql = ARKMEntityGraphQL(
+                    id=holder.entity.id,
+                    name=holder.entity.name,
+                    type=holder.entity.type,
+                ) if holder.entity else None
+                holder_label_graphql = ARKMEntityGraphQL(
+                    id=holder.label.id,
+                    name=holder.label.name,
+                    type=holder.label.chain_type,
+                ) if holder.label else None
+
                 holder_graphql = HolderGraphQL(
                     id=holder.id,
                     address=holder.address,
-                    label_name=holder.label_name,
-                    label_address=holder.label_address,
                     chain_type=holder.chain_type,
+                    entity=holder_entity_graphql,
+                    label=holder_label_graphql,
                     updated_at=holder.updated_at.isoformat() if holder.updated_at else ""
                 )
 
@@ -122,34 +120,87 @@ def convert_coin_to_graphql(coin_db):
                 holder=holder_graphql
             ))
 
-    return CoinInfoGraphQL(**coin_dict)
+    return CoinGraphQL(**coin_dict)
+
+
+def convert_exchange_spot_to_graphql(es) -> ExchangeSpotGraphQL:
+    """将数据库模型转换为GraphQL类型"""
+    return ExchangeSpotGraphQL(
+        id=es.id,
+        coin_id=es.coin_id,
+        exchange_name=es.exchange_name,
+        spot_name=es.spot_name,
+        updated_at=es.updated_at.isoformat() if es.updated_at else "",
+        coin=convert_coin_to_graphql(es.coin) if es.coin else None
+    )
+
+
+def convert_exchange_contract_to_graphql(ec) -> ExchangeContractGraphQL:
+    """将数据库模型转换为GraphQL类型"""
+    return ExchangeContractGraphQL(
+        id=ec.id,
+        coin_id=ec.coin_id,
+        exchange_name=ec.exchange_name,
+        contract_name=ec.contract_name,
+        updated_at=ec.updated_at.isoformat() if ec.updated_at else "",
+        coin=convert_coin_to_graphql(ec.coin) if ec.coin else None
+    )
+
+
+def convert_coin_holding_to_graphql(holding) -> CoinHoldingGraphQL:
+    """将数据库模型转换为GraphQL类型"""
+    return CoinHoldingGraphQL(
+        id=holding.id,
+        coin_id=holding.coin_id,
+        holder_id=holding.holder_id,
+        balance=holding.balance,
+        usd_value=holding.usd_value,
+        updated_at=holding.updated_at.isoformat() if holding.updated_at else "",
+        holder=convert_holder_to_graphql(holding.holder) if holding.holder else None
+    )
+
+def convert_holder_to_graphql(holder) -> HolderGraphQL:
+    """将数据库模型转换为GraphQL类型"""
+    return HolderGraphQL(
+        id=holder.id,
+        address=holder.address,
+        chain_type=holder.chain_type,
+        updated_at=holder.updated_at.isoformat() if holder.updated_at else "",
+        entity=convert_arkm_entity_to_graphql(holder.entity) if holder.entity else None,
+        label=convert_label_to_graphql(holder.label) if holder.label else None
+    )
+
+
+def convert_arkm_entity_to_graphql(entity) -> ARKMEntityGraphQL:
+    """将数据库模型转换为GraphQL类型"""
+    return ARKMEntityGraphQL(
+        id=entity.id,
+        name=entity.name,
+        type=entity.type,
+    )
+
+
+def convert_label_to_graphql(label) -> LabelGraphQL:
+    """将数据库模型转换为GraphQL类型"""
+    return LabelGraphQL(
+        id=label.id,
+        name=label.name,
+        chain_type=label.chain_type,
+    )
+
 
 @strawberry.type
 class Query:
     @strawberry.field
-    def coin_by_id(self, coin_id: str) -> Optional[CoinInfoGraphQL]:
-        """根据coin_id获取币种信息"""
-        db = db_manager.get_session()
-        try:
-            repository = CoinRepository(db)
-            processor = DataProcessor(db)
-            service = CoinService(repository, processor)
-            coin = service.get_coin_by_id(coin_id)
-            if not coin:
-                return None
-            return convert_coin_to_graphql(coin)
-        finally:
-            db_manager.close_session(db)
-
-    @strawberry.field
     def coins(
-        self,
-        symbol: Optional[str] = None,
-        name: Optional[str] = None,
-        contract_address: Optional[str] = None,
-        limit: Optional[int] = 50,
-        offset: Optional[int] = 0
-    ) -> List[CoinInfoGraphQL]:
+            self,
+            coin_id: Optional[str] = None,
+            symbol: Optional[str] = None,
+            name: Optional[str] = None,
+            contract_address: Optional[str] = None,
+            limit: Optional[int] = 50,
+            offset: Optional[int] = 0
+    ) -> List[CoinGraphQL]:
         """根据多种条件获取币种信息列表"""
         db = db_manager.get_session()
         try:
@@ -159,6 +210,7 @@ class Query:
 
             # 使用repository进行复杂查询
             coins = repository.get_coins_with_filters(
+                coin_id=coin_id,
                 symbol=symbol,
                 name=name,
                 contract_address=contract_address,
@@ -171,53 +223,104 @@ class Query:
             db_manager.close_session(db)
 
     @strawberry.field
-    def coins_by_exchange_type(self, exchange_type: str) -> List[CoinInfoGraphQL]:
-        """根据交易所类型获取币种信息"""
+    def spot_exchanges(
+            self,
+            exchange_id: str,
+            coin_id: Optional[str] = None,
+            limit: Optional[int] = 50,
+            offset: Optional[int] = 0
+    ) -> List[ExchangeSpotGraphQL]:
+        """根据币种ID获取现货交易所信息列表"""
         db = db_manager.get_session()
         try:
             repository = CoinRepository(db)
             processor = DataProcessor(db)
             service = CoinService(repository, processor)
-            coins = service.get_coins_by_exchange(exchange_type)
-            return [convert_coin_to_graphql(coin) for coin in coins]
+
+            # 使用repository进行复杂查询
+            exchange_spots = repository.get_exchange_spots_with_filters(
+                coin_id=coin_id,
+                exchange_id=exchange_id,
+                limit=limit,
+                offset=offset
+            )
+
+            return [convert_exchange_spot_to_graphql(es) for es in exchange_spots]
         finally:
             db_manager.close_session(db)
 
     @strawberry.field
-    def coins_by_contract_address(self, contract_address: str) -> List[CoinInfoGraphQL]:
-        """根据合约地址获取币种信息"""
+    def contract_exchanges(
+            self,
+            exchange_id: str,
+            coin_id: Optional[str] = None,
+            limit: Optional[int] = 50,
+            offset: Optional[int] = 0
+    ) -> List[ExchangeContractGraphQL]:
+        """根据币种ID获取合约交易所信息列表"""
         db = db_manager.get_session()
         try:
             repository = CoinRepository(db)
             processor = DataProcessor(db)
             service = CoinService(repository, processor)
-            coins = service.get_coins_by_contract_address(contract_address)
-            return [convert_coin_to_graphql(coin) for coin in coins]
+
+            # 使用repository进行复杂查询
+            exchange_contracts = repository.get_exchange_contracts_with_filters(
+                coin_id=coin_id,
+                exchange_id=exchange_id,
+                limit=limit,
+                offset=offset
+            )
+
+            return [convert_exchange_contract_to_graphql(ec) for ec in exchange_contracts]
         finally:
             db_manager.close_session(db)
 
     @strawberry.field
-    def coins_by_holder_address(self, holder_address: str) -> List[CoinInfoGraphQL]:
-        """根据持有者地址获取币种信息"""
+    def holders(
+            self,
+            chain_type: Optional[str] = None,
+            coin_id: Optional[str] = None,
+            limit: Optional[int] = 50,
+            offset: Optional[int] = 0
+    ) -> List[CoinHoldingGraphQL]:
+        """根据币种ID获取持仓信息列表"""
         db = db_manager.get_session()
         try:
             repository = CoinRepository(db)
             processor = DataProcessor(db)
             service = CoinService(repository, processor)
-            coins = service.get_tokens_by_holder(holder_address)
-            return [convert_coin_to_graphql(coin) for coin in coins]
+
+            # 使用repository进行复杂查询
+            holdings = repository.get_coin_holding_with_filters(
+                chain_type=chain_type,
+                coin_id=coin_id,
+                limit=limit,
+                offset=offset
+            )
+
+            return [convert_coin_holding_to_graphql(holding) for holding in holdings]
         finally:
             db_manager.close_session(db)
 
     @strawberry.field
-    def search_coins(self, search_term: str) -> List[CoinInfoGraphQL]:
-        """搜索币种信息"""
+    def holder_detail(self,
+                      holder_address: str,
+                      chain_type: Optional[str] = None,
+                      ) -> Optional[HolderGraphQL]:
+        """根据地址获取持仓信息"""
         db = db_manager.get_session()
         try:
             repository = CoinRepository(db)
             processor = DataProcessor(db)
             service = CoinService(repository, processor)
-            coins = service.search_coins(search_term)
-            return [convert_coin_to_graphql(coin) for coin in coins]
+
+            # 使用repository进行复杂查询
+            holder = repository.get_holder_with_filters(
+                holder_address=holder_address,
+                chain_type=chain_type,
+            )
+
+            return convert_holder_to_graphql(holder) if holder else None
         finally:
             db_manager.close_session(db)

@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
-from app.database.models import Coin, SupplyInfo, OnChainInfo, ExchangeSpot, ExchangeContract, Holder, CoinHolding
+from app.database.models import Coin, SupplyInfo, OnChainInfo, ExchangeSpot, ExchangeContract, Holder, CoinHolding, \
+    ARKMEntity, Label
 from app.crawlers.coingecko import CoingeckoCrawler
 from app.crawlers.coinmarketcap import CoinMarketCapCrawler
 from app.crawlers.arkm import ArkmCrawler
@@ -208,14 +209,21 @@ class DataProcessor:
                 if address_info:
                     address = address_info.get('address', '')
                     label_info = address_info.get('arkhamLabel', {})
+                    entity_info = address_info.get('arkhamEntity', {})
 
                     # 查找或创建持有者
                     holder = self.db.query(Holder).filter(Holder.address == address).first()
                     if not holder:
                         holder = Holder(
                             address=address,
-                            label_name=label_info.get('name', ''),
-                            label_address=label_info.get('address', ''),
+                            entity=ARKMEntity(
+                                name=entity_info.get('name', ''),
+                                type=entity_info.get('type', '')
+                            ),
+                            label=Label(
+                                name=label_info.get('name', ''),
+                                chain_type=chain
+                            ),
                             chain_type=chain
                         )
                         self.db.add(holder)
