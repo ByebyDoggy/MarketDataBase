@@ -59,12 +59,11 @@ class DataProcessor:
                 Coin.name == cmc_name
             ).first()
             if coin:
-                print(f"Found coin: {coin.id} - {coin.symbol} - {coin.name}")
                 # 更新供应信息
                 supply_info = self.db.query(SupplyInfo).filter(
                     SupplyInfo.coin_id == coin.id
                 ).first()
-
+                print(f"Found coin: {coin.id} - {coin.symbol} - {coin.name}, supply_info: {supply_info}")
                 if not supply_info:
                     supply_info = SupplyInfo(coin_id=coin.id)
                     self.db.add(supply_info)

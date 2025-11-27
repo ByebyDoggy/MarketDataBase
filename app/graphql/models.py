@@ -83,6 +83,7 @@ class HolderGraphQL:
     # 关联数据
     entity: Optional[ARKMEntityGraphQL] = None
     label: Optional[LabelGraphQL] = None
+    coins: List['CoinHoldingGraphQL'] = strawberry.field(default_factory=list)
 
 # ---------------------------
 # CoinHolding

@@ -159,6 +159,18 @@ def convert_coin_holding_to_graphql(holding) -> CoinHoldingGraphQL:
         holder=convert_holder_to_graphql(holding.holder) if holding.holder else None
     )
 
+def convert_coin_holding_to_graphql_without_holders(holding) -> CoinHoldingGraphQL:
+    """将数据库模型转换为GraphQL类型"""
+    return CoinHoldingGraphQL(
+        id=holding.id,
+        coin_id=holding.coin_id,
+        holder_id=holding.holder_id,
+        balance=holding.balance,
+        usd_value=holding.usd_value,
+        updated_at=holding.updated_at.isoformat() if holding.updated_at else "",
+        holder=None
+    )
+
 def convert_holder_to_graphql(holder) -> HolderGraphQL:
     """将数据库模型转换为GraphQL类型"""
     return HolderGraphQL(
@@ -167,7 +179,8 @@ def convert_holder_to_graphql(holder) -> HolderGraphQL:
         chain_type=holder.chain_type,
         updated_at=holder.updated_at.isoformat() if holder.updated_at else "",
         entity=convert_arkm_entity_to_graphql(holder.entity) if holder.entity else None,
-        label=convert_label_to_graphql(holder.label) if holder.label else None
+        label=convert_label_to_graphql(holder.label) if holder.label else None,
+        coins=[convert_coin_holding_to_graphql_without_holders(holding) for holding in holder.coin_holdings]
     )
 
 
@@ -320,7 +333,6 @@ class Query:
                 holder_address=holder_address,
                 chain_type=chain_type,
             )
-
             return convert_holder_to_graphql(holder) if holder else None
         finally:
             db_manager.close_session(db)

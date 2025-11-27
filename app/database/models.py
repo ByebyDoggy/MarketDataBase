@@ -79,13 +79,14 @@ class ExchangeSpot(SQLModel, table=True):
     __tablename__ = "exchange_spots"
     __table_args__ = (
         Index("idx_spot_coin_exchange", "coin_id", "exchange_name"),
+        Index("idx_exchange_name", "exchange_name"),  # ✅ 新增单列索引
         UniqueConstraint("exchange_name", "spot_name"),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     coin_id: str = Field(foreign_key="coins.id", nullable=False)
-    exchange_name: str = Field(nullable=False)
+    exchange_name: str = Field(nullable=False,index=True)
     spot_name: str = Field(nullable=False)
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
 
@@ -99,13 +100,14 @@ class ExchangeContract(SQLModel, table=True):
     __tablename__ = "exchange_contracts"
     __table_args__ = (
         Index("idx_contract_coin_exchange", "coin_id", "exchange_name"),
+        Index("idx_exchange_name", "exchange_name"),  # ✅ 新增单列索引
         UniqueConstraint("exchange_name", "contract_name"),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     coin_id: str = Field(foreign_key="coins.id", nullable=False)
-    exchange_name: str = Field(nullable=False)
+    exchange_name: str = Field(nullable=False,index=True)
     contract_name: str = Field(nullable=False)
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
 
