@@ -38,6 +38,8 @@ class CoinService:
 
     async def refresh_data(self):
         """刷新数据"""
+        await self.processor.initialize_ccxt_clients()
+        await self.processor.update_exchange_prices()
         await self.processor.initialize_coins_data()
         await self.processor.update_market_data()
         await self.processor.update_exchange_data()

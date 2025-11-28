@@ -6,7 +6,8 @@ from app.crawlers.coinmarketcap import CoinMarketCapCrawler
 from app.crawlers.arkm import ArkmCrawler
 from app.const import TOP_SPOT_EXCHANGES, TOP_SWAP_EXCHANGES, UPDATE_HOLDERS_EXCHANGES, ORIGIN_TOKEN_WRAPPED_TOKEN_MAP
 import logging
-
+import ccxt.pro as ccxt
+import asyncio
 logger = logging.getLogger(__name__)
 
 class DataProcessor:
@@ -15,6 +16,21 @@ class DataProcessor:
         self.cg_crawler = CoingeckoCrawler()
         self.cmc_crawler = CoinMarketCapCrawler()
         self.arkm_crawler = ArkmCrawler()
+        self.ccxt_clients_map = {
+            exchange: getattr(ccxt, exchange)({'https_proxy':'http://127.0.0.1:7890'}) for exchange in ['okx', 'binance', 'coinbase', 'bybit', 'gateio', 'kucoin']
+        }
+
+    async def initialize_ccxt_clients(self):
+        """初始化CCXT客户端"""
+        tasks = []
+        for exchange_id, ccxt_client in self.ccxt_clients_map.items():
+            try:
+                tasks.append(ccxt_client.load_markets())
+            except Exception as e:
+                logger.error(f"Failed to load markets for {exchange_id}: {str(e)}")
+                continue
+        await asyncio.gather(*tasks)
+        logger.info(f"Initialized {len(self.ccxt_clients_map)} CCXT clients")
 
     async def initialize_coins_data(self):
         """初始化币种数据"""
@@ -63,7 +79,6 @@ class DataProcessor:
                 supply_info = self.db.query(SupplyInfo).filter(
                     SupplyInfo.coin_id == coin.id
                 ).first()
-                print(f"Found coin: {coin.id} - {coin.symbol} - {coin.name}, supply_info: {supply_info}")
                 if not supply_info:
                     supply_info = SupplyInfo(coin_id=coin.id)
                     self.db.add(supply_info)
@@ -190,6 +205,83 @@ class DataProcessor:
     async def update_most_popular_wrapped_token_holders(self):
         """更新热门包装代币持有者"""
         pass
+
+    async def update_exchange_prices(self):
+        """获取所有交易所合约交易对价格"""
+        # 并发获取全部交易所的现货及合约价格，然后查询数据库，更新现货及合约价格信息
+        tasks = []
+        exchange_names = []
+
+        # 收集所有交易所的查询任务
+        for exchange_id, ccxt_client in self.ccxt_clients_map.items():
+            if hasattr(ccxt_client, 'fetch_tickers'):
+                tasks.append(ccxt_client.fetch_tickers())
+                exchange_names.append(exchange_id)
+
+        # 并发执行所有查询
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 处理查询结果
+        price_map = {}  # 用于存储每个币种的最新价格
+
+        for exchange_name, result in zip(exchange_names, results):
+            if isinstance(result, Exception):
+                logger.error(f"Error fetching tickers from {exchange_name}: {result}")
+                continue
+
+            # 遍历交易对
+            for symbol, ticker in result.items():
+                try:
+                    # 解析交易对符号 (例如: BTC/USDT)
+                    if '/' in symbol:
+                        base, quote = symbol.split('/')
+                        if quote in ['USDT', 'USDC']:  # 只处理稳定币计价的交易对
+                            # 查找对应的币种
+                            coin = self.db.query(Coin).filter(
+                                Coin.symbol == base.upper()
+                            ).first()
+
+                            if coin:
+                                price = ticker.get('last') or ticker.get('close')
+                                if price:
+                                    # 如果没有记录过该币种的价格或有更新的价格，则记录
+                                    if coin.id not in price_map or price > price_map[coin.id]:
+                                        price_map[coin.id] = price
+
+                except Exception as e:
+                    logger.error(f"Error processing ticker {symbol} from {exchange_name}: {e}")
+                    continue
+
+        # 更新数据库中的价格信息
+        updated_count = 0
+        for coin_id, price in price_map.items():
+            # 查找SupplyInfo记录
+            supply_info = self.db.query(SupplyInfo).filter(
+                SupplyInfo.coin_id == coin_id
+            ).first()
+
+            # 如果没有SupplyInfo记录但该币种在交易所中有交易，则创建新的SupplyInfo记录
+            if not supply_info:
+                # 检查该币种是否在现货或合约交易所中
+                spot_exists = self.db.query(ExchangeSpot).filter(
+                    ExchangeSpot.coin_id == coin_id
+                ).first()
+
+                contract_exists = self.db.query(ExchangeContract).filter(
+                    ExchangeContract.coin_id == coin_id
+                ).first()
+
+                if spot_exists or contract_exists:
+                    supply_info = SupplyInfo(coin_id=coin_id)
+                    self.db.add(supply_info)
+
+            # 更新价格信息
+            if supply_info:
+                supply_info.cached_price = price
+                updated_count += 1
+
+        self.db.commit()
+        logger.info(f"Updated prices for {updated_count} coins")
 
 
     async def fetch_token_holders(self, token_id: str, use_sync: bool = False):

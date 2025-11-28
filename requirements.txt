@@ -9,3 +9,4 @@ pydantic_settings
 sqlalchemy
 strawberry-graphql[fastapi]
 sqlmodel
+ccxt

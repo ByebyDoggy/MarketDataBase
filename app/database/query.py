@@ -148,3 +148,13 @@ class CoinRepository:
 
         return self.db.exec(query).first()
 
+    def get_all_coins_by_exchange_spot_id(self, exchange_spot_id: str):
+        query = (
+            select(ExchangeSpot)
+            .options(
+                selectinload(ExchangeSpot.coin)
+            )
+            .where(ExchangeSpot.id == exchange_spot_id)
+        )
+
+        return self.db.exec(query).all()
