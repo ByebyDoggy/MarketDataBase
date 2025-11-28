@@ -115,7 +115,6 @@ async def health_check(service: CoinService = Depends(get_coin_service)):
         "coin_count": coin_count
     }
 
-# 删除其他HTTP端点，使用GraphQL替代
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host=settings.API_HOST, port=settings.API_PORT, reload=settings.API_RELOAD)

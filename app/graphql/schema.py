@@ -6,7 +6,8 @@ from app.database.processor import DataProcessor
 from app.sevice import CoinService
 from app.graphql.models import (
     CoinGraphQL, SupplyInfoGraphQL, OnChainInfoGraphQL,
-    ExchangeSpotGraphQL, ExchangeContractGraphQL, CoinHoldingGraphQL, HolderGraphQL, ARKMEntityGraphQL, LabelGraphQL
+    ExchangeSpotGraphQL, ExchangeContractGraphQL, CoinHoldingGraphQL, HolderGraphQL, ARKMEntityGraphQL, LabelGraphQL,
+    CoinPriceGraphQL,
 )
 
 db_manager = DatabaseManager()
@@ -159,6 +160,7 @@ def convert_coin_holding_to_graphql(holding) -> CoinHoldingGraphQL:
         holder=convert_holder_to_graphql(holding.holder) if holding.holder else None
     )
 
+
 def convert_coin_holding_to_graphql_without_holders(holding) -> CoinHoldingGraphQL:
     """将数据库模型转换为GraphQL类型"""
     return CoinHoldingGraphQL(
@@ -170,6 +172,7 @@ def convert_coin_holding_to_graphql_without_holders(holding) -> CoinHoldingGraph
         updated_at=holding.updated_at.isoformat() if holding.updated_at else "",
         holder=None
     )
+
 
 def convert_holder_to_graphql(holder) -> HolderGraphQL:
     """将数据库模型转换为GraphQL类型"""
@@ -336,3 +339,44 @@ class Query:
             return convert_holder_to_graphql(holder) if holder else None
         finally:
             db_manager.close_session(db)
+
+    @strawberry.field
+    def price(self,
+              coin_id:Optional[str] = None,
+              contract_address: Optional[str] = None,
+              ) -> Optional[CoinPriceGraphQL]:
+        """根据币种ID获取价格信息"""
+        pricecache = db_manager.get_cache(f"price:{coin_id}:{contract_address}")
+        if pricecache:
+            return CoinPriceGraphQL(
+                coin_id=pricecache.coin_id,
+                price=pricecache.cached_price,
+                updated_at=pricecache.updated_at
+            )
+        else:
+            db = db_manager.get_session()
+            try:
+                repository = CoinRepository(db)
+                processor = DataProcessor(db)
+                service = CoinService(repository, processor)
+
+                # 使用repository进行复杂查询
+                coins = repository.get_coins_with_filters(
+                    coin_id=coin_id,
+                    contract_address=contract_address,
+                    limit=1,
+                    offset=0
+                )
+                if coins:
+                    pricecache = coins[0].supply_info
+                    db_manager.set_cache(f"price:{coin_id}:{contract_address}", pricecache)
+                    return CoinPriceGraphQL(
+                        coin_id=pricecache.coin_id,
+                        price=pricecache.cached_price,
+                        updated_at=pricecache.updated_at
+                    )
+                else:
+                    return None
+            finally:
+                db_manager.close_session(db)
+

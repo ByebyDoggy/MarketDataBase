@@ -121,3 +121,9 @@ class CoinGraphQL:
     exchange_spots: List[ExchangeSpotGraphQL] = strawberry.field(default_factory=list)
     exchange_contracts: List[ExchangeContractGraphQL] = strawberry.field(default_factory=list)
     holdings: List[CoinHoldingGraphQL] = strawberry.field(default_factory=list)
+
+@strawberry.type
+class CoinPriceGraphQL:
+    coin_id: str
+    price: Optional[float]
+    updated_at: datetime.datetime

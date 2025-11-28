@@ -147,3 +147,4 @@ class CoinRepository:
         query = query.where(Holder.address == holder_address)
 
         return self.db.exec(query).first()
+
