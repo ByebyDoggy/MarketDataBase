@@ -64,6 +64,8 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(app_service.processor.update_exchange_data, IntervalTrigger(minutes=settings.EXCHANGE_DATA_REFRESH_INTERVAL_MINUTES))
     scheduler.add_job(app_service.processor.update_market_data, IntervalTrigger(minutes=settings.MARKET_DATA_REFRESH_INTERVAL_MINUTES))
     scheduler.add_job(app_service.processor.update_top_project_token_holders, IntervalTrigger(minutes=settings.TOKEN_HOLDERS_REFRESH_INTERVAL_MINUTES))
+    # scheduler.add_job(app_service.processor.update_exchange_prices_with_ccxt, IntervalTrigger(minutes=settings.EXCHANGE_DATA_REFRESH_INTERVAL_MINUTES))
+    scheduler.add_job(app_service.processor.update_exchange_prices_with_cg, IntervalTrigger(minutes=settings.EXCHANGE_DATA_REFRESH_INTERVAL_MINUTES))
     scheduler.start()
 
     logger.info("Application started")
@@ -79,7 +81,8 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan
 )
-
+from app.blueprints.quick_search import router as quick_search_router
+app.include_router(quick_search_router)
 # 添加GraphQL路由
 graphql_app = GraphQLRouter(schema)
 app.include_router(graphql_app, prefix="/graphql")

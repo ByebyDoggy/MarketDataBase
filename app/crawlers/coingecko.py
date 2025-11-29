@@ -47,3 +47,16 @@ class CoingeckoCrawler(BaseCrawler):
         except Exception as e:
             logger.error(f"Error fetching derivatives tickers for {exchange_id}: {e}")
             return []
+
+    async def fetch_simple_price(self, ids: list[str]):
+        """获取简单价格"""
+        concat_with_dot = ','.join(ids)
+        try:
+            response = await self.cg.simple.price.get(
+                ids=concat_with_dot,
+                vs_currencies='usd'
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Error fetching simple price for {ids}: {e}")
+            return {}

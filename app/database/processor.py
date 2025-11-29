@@ -1,13 +1,16 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from app.database.models import Coin, SupplyInfo, OnChainInfo, ExchangeSpot, ExchangeContract, Holder, CoinHolding, \
     ARKMEntity, Label
 from app.crawlers.coingecko import CoingeckoCrawler
 from app.crawlers.coinmarketcap import CoinMarketCapCrawler
 from app.crawlers.arkm import ArkmCrawler
-from app.const import TOP_SPOT_EXCHANGES, TOP_SWAP_EXCHANGES, UPDATE_HOLDERS_EXCHANGES, ORIGIN_TOKEN_WRAPPED_TOKEN_MAP
-import logging
+from app.const import TOP_SPOT_EXCHANGES, TOP_SWAP_EXCHANGES, UPDATE_HOLDERS_EXCHANGES, ORIGIN_TOKEN_WRAPPED_TOKEN_MAP, \
+    CCXT_SPOT_EXCHANGE_TO_CMC_EXCHANGE, CCXT_SWAP_EXCHANGE_TO_CMC_EXCHANGE,CMC_SPOT_EXCHANGE_TO_CCXT_EXCHANGE,CMC_SWAP_EXCHANGE_TO_CCXT_EXCHANGE
 import ccxt.pro as ccxt
 import asyncio
+import logging
+from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 class DataProcessor:
@@ -16,8 +19,13 @@ class DataProcessor:
         self.cg_crawler = CoingeckoCrawler()
         self.cmc_crawler = CoinMarketCapCrawler()
         self.arkm_crawler = ArkmCrawler()
+        # 判断操作系统是否为Windows，Windows下需要设置代理，否则会报错
+        import os
+        ccxt_config = {}
+        if os.name == 'nt':
+            ccxt_config = {'https_proxy':'http://127.0.0.1:7890'}
         self.ccxt_clients_map = {
-            exchange: getattr(ccxt, exchange)({'https_proxy':'http://127.0.0.1:7890'}) for exchange in ['okx', 'binance', 'coinbase', 'bybit', 'gateio', 'kucoin']
+            exchange: getattr(ccxt, exchange)(ccxt_config) for exchange in ['okx', 'binance', 'coinbase', 'bybit', 'gateio', 'kucoin']
         }
 
     async def initialize_ccxt_clients(self):
@@ -171,6 +179,41 @@ class DataProcessor:
         self.db.commit()
         logger.info("Exchange data updated")
 
+    async def update_exchange_prices_with_cg(self):
+        """获取所有交易所合约交易对价格"""
+        # 获取全部具有上线交易所现货及合约的coin_id，然后查询数据库，更新现货及合约价格信息
+        all_coin_ids = self.db.query(Coin.id).filter(
+            Coin.id.in_(
+                self.db.query(ExchangeSpot.coin_id).union(
+                    self.db.query(ExchangeContract.coin_id)
+                ).distinct()
+            )
+        ).all()
+        print(f"Total coin ids to update by CoinGecko: {len(all_coin_ids)}")
+        # 分批次查询以避免超出http get请求uri长度限制
+        batch_size = 100
+        for i in range(0, len(all_coin_ids), batch_size):
+            batch_coin_ids = [coin_id[0] for coin_id in all_coin_ids[i:i + batch_size]]
+            response = await self.cg_crawler.fetch_simple_price(
+                ids=batch_coin_ids
+            )
+            for coin_id, price_info in response.items():
+                if hasattr(price_info, 'usd'):
+                    supply_info = self.db.query(SupplyInfo).filter(
+                        SupplyInfo.coin_id == coin_id
+                    ).first()
+
+                    if not supply_info:
+                        supply_info = SupplyInfo(coin_id=coin_id)
+                        self.db.add(supply_info)
+
+                    # 直接更新对象属性
+                    supply_info.cached_price = price_info.usd
+                    supply_info.updated_at = datetime.now(timezone.utc)
+
+            self.db.commit()
+            self.db.flush()
+
     async def update_top_project_token_holders(self):
         """更新顶级项目代币持有者"""
         # 获取顶级项目代币列表,查询代币的具有现货交易所/合约交易所在TOP_SPOT_EXCHANGES或TOP_SWAP_EXCHANGES中的任意一个
@@ -206,7 +249,7 @@ class DataProcessor:
         """更新热门包装代币持有者"""
         pass
 
-    async def update_exchange_prices(self):
+    async def update_exchange_prices_with_ccxt(self):
         """获取所有交易所合约交易对价格"""
         # 并发获取全部交易所的现货及合约价格，然后查询数据库，更新现货及合约价格信息
         tasks = []
@@ -234,19 +277,48 @@ class DataProcessor:
                 try:
                     # 解析交易对符号 (例如: BTC/USDT)
                     if '/' in symbol:
-                        base, quote = symbol.split('/')
+                        try:
+                            base_quote = symbol.split(':')
+                            if len(base_quote) == 2:
+                                base, quote = base_quote[0].split('/')
+                            else:
+                                base, quote = symbol.split('/')
+                        except:
+                            raise ValueError(f"Invalid symbol format: {symbol}")
+                        if base.upper() == "ALT" or base.upper() == 'ALTCOIN':
+                            pass
                         if quote in ['USDT', 'USDC']:  # 只处理稳定币计价的交易对
                             # 查找对应的币种
-                            coin = self.db.query(Coin).filter(
-                                Coin.symbol == base.upper()
+                            coin = self.db.query(Coin).join(ExchangeSpot, Coin.id == ExchangeSpot.coin_id).filter(
+                                and_(
+                                    ExchangeSpot.exchange_name == CCXT_SPOT_EXCHANGE_TO_CMC_EXCHANGE.get(exchange_name),
+                                    ExchangeSpot.spot_name == (base + '/' + quote).upper()
+                                )
+                            ).union(
+                                self.db.query(Coin).join(ExchangeContract, Coin.id == ExchangeContract.coin_id).filter(
+                                    and_(
+                                        ExchangeContract.exchange_name == CCXT_SWAP_EXCHANGE_TO_CMC_EXCHANGE.get(
+                                            exchange_name),
+                                        ExchangeContract.contract_name == (base + '/' + quote).upper()
+                                    )
+                                )
                             ).first()
 
-                            if coin:
-                                price = ticker.get('last') or ticker.get('close')
-                                if price:
-                                    # 如果没有记录过该币种的价格或有更新的价格，则记录
-                                    if coin.id not in price_map or price > price_map[coin.id]:
-                                        price_map[coin.id] = price
+                            if coin and not coin.symbol.startswith('1'):
+                                # 检查该币种是否在现货或合约交易所中
+                                spot_exists = self.db.query(ExchangeSpot).filter(
+                                    ExchangeSpot.coin_id == coin.id
+                                ).first()
+
+                                contract_exists = self.db.query(ExchangeContract).filter(
+                                    ExchangeContract.coin_id == coin.id
+                                ).first()
+                                if spot_exists or contract_exists:
+                                    price = ticker.get('last') or ticker.get('close')
+                                    if price:
+                                        # 如果没有记录过该币种的价格或有更新的价格，则记录
+                                        if coin.id not in price_map or price > price_map[coin.id]:
+                                            price_map[coin.id] = price
 
                 except Exception as e:
                     logger.error(f"Error processing ticker {symbol} from {exchange_name}: {e}")
@@ -281,6 +353,7 @@ class DataProcessor:
                 updated_count += 1
 
         self.db.commit()
+        self.db.flush()
         logger.info(f"Updated prices for {updated_count} coins")
 
 

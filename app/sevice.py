@@ -38,9 +38,11 @@ class CoinService:
 
     async def refresh_data(self):
         """刷新数据"""
-        await self.processor.initialize_ccxt_clients()
-        await self.processor.update_exchange_prices()
+        # await self.processor.initialize_ccxt_clients()
+        await self.processor.update_exchange_prices_with_cg()
+        # await self.processor.update_exchange_prices_with_ccxt()
         await self.processor.initialize_coins_data()
         await self.processor.update_market_data()
         await self.processor.update_exchange_data()
-        asyncio.create_task(self.processor.update_top_project_token_holders())
+        import threading
+        threading.Thread(target=lambda: asyncio.run(self.processor.update_top_project_token_holders())).start()

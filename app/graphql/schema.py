@@ -258,7 +258,7 @@ class Query:
                 coin_id=coin_id,
                 exchange_id=exchange_id,
                 limit=limit,
-                offset=offset
+                offset=offset,
             )
 
             return [convert_exchange_spot_to_graphql(es) for es in exchange_spots]
@@ -379,4 +379,3 @@ class Query:
                     return None
             finally:
                 db_manager.close_session(db)
-
